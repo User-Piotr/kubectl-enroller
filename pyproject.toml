@@ -1,6 +1,6 @@
 [project]
 name = "kubectl-enroller"
-version = "0.1.0"
+version = "0.2.0"
 description = "A tool for managing TLS certificates in Kubernetes"
 authors = [
     { name = "Piotr Kmiecik", email = "piotr@kmiecik.it" }

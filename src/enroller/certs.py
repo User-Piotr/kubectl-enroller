@@ -4,7 +4,9 @@ import typer
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.types import (
+    CertificateIssuerPrivateKeyTypes,
+)
 
 
 class CertificateLoader:
@@ -16,14 +18,13 @@ class CertificateLoader:
         self.userdata = userdata
 
     def __validate_match(
-        self, cert: x509.Certificate, private_key: serialization.PrivateFormat
+        self, cert: x509.Certificate, private_key: CertificateIssuerPrivateKeyTypes
     ) -> None:
         """
         Validate if the certificate and key match.
         """
 
-        # Ensure the private key matches the certificate's public key
-        if isinstance(private_key, rsa.RSAPrivateKey):
+        try:
             public_key = private_key.public_key()
             if public_key.public_numbers() != cert.public_key().public_numbers():
                 utils.console.print(
@@ -31,9 +32,9 @@ class CertificateLoader:
                     style="bold red",
                 )
                 raise typer.Exit()
-        else:
+        except AttributeError:
             utils.console.print(
-                f"Error: Unsupported private key type: {(private_key)}.",
+                f"Error: Unsupported private key type: {type(private_key).__name__}.",
                 style="bold red",
             )
             raise typer.Exit()
