@@ -9,18 +9,28 @@ A kubectl plugin that allows you to manage certificates in Kubernetes.
 
 ## Installation
 
+Both methods install from a tagged release. Replace `v1.0.0` with any tag from
+the [releases page](https://github.com/User-Piotr/kubectl-enroller/releases), or
+drop the `@v1.0.0` suffix to track the tip of `main`.
+
 ### uv
 
 ```sh
-uv tool install --python 3.12 git+https://github.com/User-Piotr/kubectl-enroller
+uv tool install --python 3.12 git+https://github.com/User-Piotr/kubectl-enroller@v1.0.0
 uv tool update-shell
 kubectl enroller --help
+```
+
+To move to a different release later:
+
+```sh
+uv tool install --force --python 3.12 git+https://github.com/User-Piotr/kubectl-enroller@v1.1.0
 ```
 
 ### pipx
 
 ```sh
-pipx install git+https://github.com/User-Piotr/kubectl-enroller
+pipx install git+https://github.com/User-Piotr/kubectl-enroller@v1.0.0
 ```
 
 Either method installs the plugin and makes it available as `kubectl enroller`.
