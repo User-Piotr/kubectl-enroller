@@ -44,3 +44,10 @@ First tagged release. No functional change from 0.2.0.
 - Kubernetes clients are built with `config.new_client_from_config(context=...)`
   rather than `load_kube_config()` plus a bare `ApiClient()`, so the global
   default client configuration is no longer mutated
+
+### Fixed
+- `requires-python` declared `>= 3.8`, but the code uses PEP 604 unions
+  (`str | None`) in a dataclass field annotation and a function signature, both
+  evaluated at import time. Installing on 3.8/3.9 resolved cleanly and then
+  raised `TypeError` on first run. Now declares `>=3.12`, matching the README
+  and `.python-version`
