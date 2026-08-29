@@ -3,6 +3,7 @@ import base64
 import enroller.data as data
 import enroller.utils as utils
 import kubernetes.client
+import typer
 import urllib3
 from enroller.certs import CertificateLoader
 from kubernetes import config
@@ -15,15 +16,50 @@ class KubernetesSecretOperator:
     Class to manage Kubernetes secrets.
     """
 
-    def __init__(self, cert: data.Certificate, userdata: data.UserData) -> None:
+    def __init__(
+        self,
+        cert: data.Certificate,
+        userdata: data.UserData,
+        context: str | None = None,
+    ) -> None:
         self.cert = cert
         self.userdata = userdata
 
         self.kubernetes_certificates: list[data.Secrets] = []
 
-        config.load_kube_config()
-        self.api_client = kubernetes.client.ApiClient()
+        self.context, self.cluster = self.__resolve_context(context)
+        self.api_client = config.new_client_from_config(context=self.context)
         self.v1 = kubernetes.client.CoreV1Api(self.api_client)
+
+    @staticmethod
+    def __resolve_context(context: str | None) -> tuple[str, str]:
+        """
+        Resolve the kubeconfig context to use. Returns (context, cluster).
+        """
+
+        try:
+            contexts, active_context = config.list_kube_config_contexts()
+        except config.ConfigException as error:
+            utils.console.print(
+                f"Error reading kubeconfig: {error}", style="bold red"
+            )
+            raise typer.Exit(code=1)
+
+        available = {entry["name"]: entry for entry in contexts}
+
+        if context is None:
+            selected = active_context
+        elif context in available:
+            selected = available[context]
+        else:
+            utils.console.print(
+                f"Error: context '{context}' not found in kubeconfig.",
+                style="bold red",
+            )
+            utils.console.print(f"Available contexts: {', '.join(available)}")
+            raise typer.Exit(code=1)
+
+        return selected["name"], selected["context"].get("cluster", "unknown")
 
     def close(self) -> None:
         """

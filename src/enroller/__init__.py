@@ -1,3 +1,5 @@
+from typing import Optional
+
 import enroller.utils as utils
 import typer
 from enroller.certs import CertificateLoader
@@ -7,6 +9,17 @@ from enroller.version import __version__
 from typing_extensions import Annotated
 
 app = typer.Typer(no_args_is_help=True, rich_markup_mode="markdown")
+
+ContextOption = Annotated[
+    Optional[str],
+    typer.Option(
+        "-context",
+        "--context",
+        help="Kubeconfig context to use (defaults to the current context)",
+        rich_help_panel="Arguments",
+        show_default=False,
+    ),
+]
 
 
 def __version_callback(value: bool):
@@ -101,6 +114,7 @@ def list(
             callback=utils.validate_path,
         ),
     ],
+    context: ContextOption = None,
 ) -> None:
     """
     List Kubernetes secrets that use the specified certificate. :book:
@@ -110,12 +124,15 @@ def list(
         __debug_callback()
 
     cert = CertificateLoader(ctx.obj).load_certificate_file(cert_path=cert)
-    output = (
-        KubernetesSecretOperator(userdata=ctx.obj, cert=cert)
-        .find_secrets()
-        .get_secrets()
+    operator = KubernetesSecretOperator(
+        userdata=ctx.obj, cert=cert, context=context
     )
+    output = operator.find_secrets().get_secrets()
 
+    utils.console.print(
+        f"Context: {operator.context}   Cluster: {operator.cluster}\n",
+        style="bold blue",
+    )
     utils.console.print(
         (
             output
@@ -154,6 +171,7 @@ def patch(
             callback=utils.validate_path,
         ),
     ],
+    context: ContextOption = None,
 ) -> None:
     """
     Patch Kubernetes secrets that use the specified certificate. :hammer:
@@ -168,20 +186,37 @@ def patch(
     )
     certificate.complement(cert=cert, key=key)
 
+    # Find the target secrets *before* asking for confirmation.
+    operator = KubernetesSecretOperator(
+        userdata=ctx.obj, cert=certificate, context=context
+    )
+    targets = operator.find_secrets().get_secrets()
+
+    if not targets:
+        utils.console.print("No secrets found to patch.", style="bold red")
+        raise typer.Exit()
+
+    # Show which cluster, and exactly what will be overwritten.
     utils.console.print(
-        f"\nAre u sure to patch the secrets with the certificate: \n{certificate}",
+        f"\nContext: {operator.context}   Cluster: {operator.cluster}",
+        style="bold red",
+    )
+    utils.console.print(
+        f"About to patch {len(targets)} secret(s) with: \n{certificate}",
         style="bold yellow",
     )
+    for secret in targets:
+        utils.console.print(
+            f"  - {secret.namespace}/{secret.name} "
+            f"(current cert expires {secret.cert.expiration_date:%Y-%m-%d})"
+        )
+
     if not typer.confirm("\nConfirm?"):
         utils.console.print("Operation aborted.", style="bold red")
         raise typer.Exit(code=1)
 
     # Patch secrets.
-    output = (
-        KubernetesSecretOperator(userdata=ctx.obj, cert=certificate)
-        .find_secrets()
-        .patch_secret()
-    )
+    output = operator.patch_secret()
 
     utils.console.print(
         (output if output else "No secrets found to patch."),
