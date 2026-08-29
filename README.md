@@ -5,13 +5,25 @@ A kubectl plugin that allows you to manage certificates in Kubernetes.
 ## Requirements
 
 - Python 3.12.6 or later
-- pipx
+- [uv](https://docs.astral.sh/uv/) or pipx
 
 ## Installation
 
-`pipx install git+https://github.com/User-Piotr/kubectl-enroller`
+### uv
 
-This will install the plugin and make it available as `kubectl enroller`.
+```sh
+uv tool install --python 3.12 git+https://github.com/User-Piotr/kubectl-enroller
+uv tool update-shell
+kubectl enroller --help
+```
+
+### pipx
+
+```sh
+pipx install git+https://github.com/User-Piotr/kubectl-enroller
+```
+
+Either method installs the plugin and makes it available as `kubectl enroller`.
 
 ## Usage
 
