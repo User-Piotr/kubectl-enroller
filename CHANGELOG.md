@@ -51,3 +51,27 @@ First tagged release. No functional change from 0.2.0.
   evaluated at import time. Installing on 3.8/3.9 resolved cleanly and then
   raised `TypeError` on first run. Now declares `>=3.12`, matching the README
   and `.python-version`
+
+## 1.2.0
+
+### Fixed
+- Cluster API errors were caught inside `find_secrets`, so they never reached
+  the `@retry` decorator (which therefore never retried) and surfaced to the
+  user as an empty result. An unreachable cluster or expired token rendered as
+  "No secrets found that use the specified certificate" and exited 0
+- `patch` reported success when the cluster call failed, so a certificate
+  rotation against a cluster it could not reach silently did nothing and still
+  exited 0
+- Individual secrets that failed to patch were printed but not counted; a run
+  where most patches failed still exited 0. Failures are now listed and exit 1
+- A secret whose `tls.crt` was missing, empty, or unparseable raised and
+  aborted the entire run. cert-manager creates such placeholder secrets before
+  issuance, and they match the `type=kubernetes.io/tls` selector. They are now
+  skipped by name and the run continues
+
+### Changed
+- `list` and `patch` exit 1 on cluster failures instead of 0
+- Skipped secrets are reported by `namespace/name`, and `patch` warns about
+  them before asking for confirmation, since an unreadable secret may be one
+  that needed patching
+
