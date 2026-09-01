@@ -10,6 +10,9 @@ from kubernetes import config
 from kubernetes.client.rest import ApiException
 from retry import retry
 
+# Errors that mean "the cluster call failed", as opposed to "nothing matched".
+CLUSTER_ERRORS = (ApiException, urllib3.exceptions.MaxRetryError)
+
 
 class KubernetesSecretOperator:
     """
@@ -26,6 +29,8 @@ class KubernetesSecretOperator:
         self.userdata = userdata
 
         self.kubernetes_certificates: list[data.Secrets] = []
+        self.failed_patches: list[str] = []
+        self.skipped_secrets: list[str] = []
 
         self.context, self.cluster = self.__resolve_context(context)
         self.api_client = config.new_client_from_config(context=self.context)
@@ -40,9 +45,7 @@ class KubernetesSecretOperator:
         try:
             contexts, active_context = config.list_kube_config_contexts()
         except config.ConfigException as error:
-            utils.console.print(
-                f"Error reading kubeconfig: {error}", style="bold red"
-            )
+            utils.console.print(f"Error reading kubeconfig: {error}", style="bold red")
             raise typer.Exit(code=1)
 
         available = {entry["name"]: entry for entry in contexts}
@@ -68,8 +71,16 @@ class KubernetesSecretOperator:
         if self.api_client:
             self.api_client.close()
 
-    @retry((ApiException, urllib3.exceptions.MaxRetryError), tries=3, delay=2)
-    def find_secrets(self) -> list[data.Secrets]:
+    def __skip(self, reference: str, reason: str) -> None:
+        """
+        Record a secret that could not be read, and say so.
+        """
+
+        self.skipped_secrets.append(reference)
+        utils.console.print(f"Skipping {reference}: {reason}", style="bold yellow")
+
+    @retry(CLUSTER_ERRORS, tries=3, delay=2)
+    def find_secrets(self) -> "KubernetesSecretOperator":
         """
         List Kubernetes secrets and find the ones that use the specified certificate.
         """
@@ -81,15 +92,24 @@ class KubernetesSecretOperator:
 
             kubernetes_certificate = CertificateLoader(userdata=self.userdata)
             self.kubernetes_certificates.clear()
+            self.skipped_secrets.clear()
 
             for secret in secrets:
-                # Decode the certificate
-                body = base64.b64decode(secret.data["tls.crt"])
+                reference = f"{secret.metadata.namespace}/{secret.metadata.name}"
 
-                # Load the certificate
-                certificate = kubernetes_certificate.load_certificate_string(
-                    cert_data=body
-                )
+                # Skip secrets whose tls.crt is missing or unparseable
+                try:
+                    body = base64.b64decode(secret.data["tls.crt"])
+                    certificate = kubernetes_certificate.load_certificate_string(
+                        cert_data=body
+                    )
+                except (KeyError, TypeError):
+                    self.__skip(reference, "missing or empty tls.crt data")
+                    continue
+                except ValueError as error:
+                    reason = str(error).split("\n")[0] or "unparseable certificate"
+                    self.__skip(reference, reason)
+                    continue
 
                 # Compare the domains
                 if set(self.cert.domains).intersection(certificate.domains):
@@ -106,22 +126,16 @@ class KubernetesSecretOperator:
                             style="bold yellow",
                         )
 
-        except ApiException as error:
-            utils.console.print(f"Error listing secrets: {error}", style="bold red")
-
-        except urllib3.exceptions.MaxRetryError as error:
-            utils.console.print(f"MaxRetryError: {error}", style="bold red")
-
         finally:
             self.close()
 
         return self
 
-    def get_secrets(self):
+    def get_secrets(self) -> list[data.Secrets]:
         return self.kubernetes_certificates
 
-    @retry((ApiException, urllib3.exceptions.MaxRetryError), tries=3, delay=2)
-    def patch_secret(self) -> None:
+    @retry(CLUSTER_ERRORS, tries=3, delay=2)
+    def patch_secret(self) -> list[data.Secrets]:
         """
         Patch the Kubernetes secret.
         """
@@ -132,6 +146,8 @@ class KubernetesSecretOperator:
                 "tls.key": self.cert.key,
             }
         }
+
+        self.failed_patches.clear()
 
         try:
             for secret in self.kubernetes_certificates:
@@ -150,6 +166,7 @@ class KubernetesSecretOperator:
                         )
 
                 except ApiException as error:
+                    self.failed_patches.append(f"{secret.namespace}/{secret.name}")
                     utils.console.print(
                         f"Error patching secret {secret.name} in namespace {secret.namespace}: {error}",  # noqa
                         style="bold red",

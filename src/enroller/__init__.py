@@ -4,6 +4,7 @@ import enroller.utils as utils
 import typer
 from enroller.certs import CertificateLoader
 from enroller.data import UserData
+from enroller.secrets import CLUSTER_ERRORS
 from enroller.secrets import KubernetesSecretOperator
 from enroller.version import __version__
 from typing_extensions import Annotated
@@ -124,10 +125,12 @@ def list(
         __debug_callback()
 
     cert = CertificateLoader(ctx.obj).load_certificate_file(cert_path=cert)
-    operator = KubernetesSecretOperator(
-        userdata=ctx.obj, cert=cert, context=context
-    )
-    output = operator.find_secrets().get_secrets()
+    operator = KubernetesSecretOperator(userdata=ctx.obj, cert=cert, context=context)
+    try:
+        output = operator.find_secrets().get_secrets()
+    except CLUSTER_ERRORS as error:
+        utils.console.print(f"Error listing secrets: {error}", style="bold red")
+        raise typer.Exit(code=1)
 
     utils.console.print(
         f"Context: {operator.context}   Cluster: {operator.cluster}\n",
@@ -190,10 +193,20 @@ def patch(
     operator = KubernetesSecretOperator(
         userdata=ctx.obj, cert=certificate, context=context
     )
-    targets = operator.find_secrets().get_secrets()
+    try:
+        targets = operator.find_secrets().get_secrets()
+    except CLUSTER_ERRORS as error:
+        utils.console.print(f"Error listing secrets: {error}", style="bold red")
+        raise typer.Exit(code=1)
 
     if not targets:
         utils.console.print("No secrets found to patch.", style="bold red")
+        if operator.skipped_secrets:
+            utils.console.print(
+                f"{len(operator.skipped_secrets)} secret(s) could not be read: "
+                f"{', '.join(operator.skipped_secrets)}",
+                style="bold yellow",
+            )
         raise typer.Exit()
 
     # Show which cluster, and exactly what will be overwritten.
@@ -211,17 +224,37 @@ def patch(
             f"(current cert expires {secret.cert.expiration_date:%Y-%m-%d})"
         )
 
+    if operator.skipped_secrets:
+        utils.console.print(
+            f"\nWarning: {len(operator.skipped_secrets)} secret(s) could not be "
+            f"read and were not considered: "
+            f"{', '.join(operator.skipped_secrets)}",
+            style="bold yellow",
+        )
+
     if not typer.confirm("\nConfirm?"):
         utils.console.print("Operation aborted.", style="bold red")
         raise typer.Exit(code=1)
 
     # Patch secrets.
-    output = operator.patch_secret()
+    try:
+        output = operator.patch_secret()
+    except CLUSTER_ERRORS as error:
+        utils.console.print(f"Error patching secrets: {error}", style="bold red")
+        raise typer.Exit(code=1)
 
     utils.console.print(
         (output if output else "No secrets found to patch."),
         style="bold green" if output else "bold red",
     )
+
+    if operator.failed_patches:
+        utils.console.print(
+            f"Failed to patch {len(operator.failed_patches)} secret(s): "
+            f"{', '.join(operator.failed_patches)}",
+            style="bold red",
+        )
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
