@@ -125,9 +125,7 @@ def list(
         __debug_callback()
 
     cert = CertificateLoader(ctx.obj).load_certificate_file(cert_path=cert)
-    operator = KubernetesSecretOperator(
-        userdata=ctx.obj, cert=cert, context=context
-    )
+    operator = KubernetesSecretOperator(userdata=ctx.obj, cert=cert, context=context)
     try:
         output = operator.find_secrets().get_secrets()
     except CLUSTER_ERRORS as error:

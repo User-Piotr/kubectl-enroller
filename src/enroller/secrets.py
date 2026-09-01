@@ -45,9 +45,7 @@ class KubernetesSecretOperator:
         try:
             contexts, active_context = config.list_kube_config_contexts()
         except config.ConfigException as error:
-            utils.console.print(
-                f"Error reading kubeconfig: {error}", style="bold red"
-            )
+            utils.console.print(f"Error reading kubeconfig: {error}", style="bold red")
             raise typer.Exit(code=1)
 
         available = {entry["name"]: entry for entry in contexts}
