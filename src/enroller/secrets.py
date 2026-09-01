@@ -10,6 +10,9 @@ from kubernetes import config
 from kubernetes.client.rest import ApiException
 from retry import retry
 
+# Errors that mean "the cluster call failed", as opposed to "nothing matched".
+CLUSTER_ERRORS = (ApiException, urllib3.exceptions.MaxRetryError)
+
 
 class KubernetesSecretOperator:
     """
@@ -26,6 +29,7 @@ class KubernetesSecretOperator:
         self.userdata = userdata
 
         self.kubernetes_certificates: list[data.Secrets] = []
+        self.failed_patches: list[str] = []
 
         self.context, self.cluster = self.__resolve_context(context)
         self.api_client = config.new_client_from_config(context=self.context)
@@ -68,8 +72,8 @@ class KubernetesSecretOperator:
         if self.api_client:
             self.api_client.close()
 
-    @retry((ApiException, urllib3.exceptions.MaxRetryError), tries=3, delay=2)
-    def find_secrets(self) -> list[data.Secrets]:
+    @retry(CLUSTER_ERRORS, tries=3, delay=2)
+    def find_secrets(self) -> "KubernetesSecretOperator":
         """
         List Kubernetes secrets and find the ones that use the specified certificate.
         """
@@ -106,22 +110,16 @@ class KubernetesSecretOperator:
                             style="bold yellow",
                         )
 
-        except ApiException as error:
-            utils.console.print(f"Error listing secrets: {error}", style="bold red")
-
-        except urllib3.exceptions.MaxRetryError as error:
-            utils.console.print(f"MaxRetryError: {error}", style="bold red")
-
         finally:
             self.close()
 
         return self
 
-    def get_secrets(self):
+    def get_secrets(self) -> list[data.Secrets]:
         return self.kubernetes_certificates
 
-    @retry((ApiException, urllib3.exceptions.MaxRetryError), tries=3, delay=2)
-    def patch_secret(self) -> None:
+    @retry(CLUSTER_ERRORS, tries=3, delay=2)
+    def patch_secret(self) -> list[data.Secrets]:
         """
         Patch the Kubernetes secret.
         """
@@ -132,6 +130,8 @@ class KubernetesSecretOperator:
                 "tls.key": self.cert.key,
             }
         }
+
+        self.failed_patches.clear()
 
         try:
             for secret in self.kubernetes_certificates:
@@ -150,6 +150,7 @@ class KubernetesSecretOperator:
                         )
 
                 except ApiException as error:
+                    self.failed_patches.append(f"{secret.namespace}/{secret.name}")
                     utils.console.print(
                         f"Error patching secret {secret.name} in namespace {secret.namespace}: {error}",  # noqa
                         style="bold red",
