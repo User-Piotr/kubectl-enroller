@@ -30,6 +30,7 @@ class KubernetesSecretOperator:
 
         self.kubernetes_certificates: list[data.Secrets] = []
         self.failed_patches: list[str] = []
+        self.skipped_secrets: list[str] = []
 
         self.context, self.cluster = self.__resolve_context(context)
         self.api_client = config.new_client_from_config(context=self.context)
@@ -72,6 +73,14 @@ class KubernetesSecretOperator:
         if self.api_client:
             self.api_client.close()
 
+    def __skip(self, reference: str, reason: str) -> None:
+        """
+        Record a secret that could not be read, and say so.
+        """
+
+        self.skipped_secrets.append(reference)
+        utils.console.print(f"Skipping {reference}: {reason}", style="bold yellow")
+
     @retry(CLUSTER_ERRORS, tries=3, delay=2)
     def find_secrets(self) -> "KubernetesSecretOperator":
         """
@@ -85,15 +94,24 @@ class KubernetesSecretOperator:
 
             kubernetes_certificate = CertificateLoader(userdata=self.userdata)
             self.kubernetes_certificates.clear()
+            self.skipped_secrets.clear()
 
             for secret in secrets:
-                # Decode the certificate
-                body = base64.b64decode(secret.data["tls.crt"])
+                reference = f"{secret.metadata.namespace}/{secret.metadata.name}"
 
-                # Load the certificate
-                certificate = kubernetes_certificate.load_certificate_string(
-                    cert_data=body
-                )
+                # Skip secrets whose tls.crt is missing or unparseable
+                try:
+                    body = base64.b64decode(secret.data["tls.crt"])
+                    certificate = kubernetes_certificate.load_certificate_string(
+                        cert_data=body
+                    )
+                except (KeyError, TypeError):
+                    self.__skip(reference, "missing or empty tls.crt data")
+                    continue
+                except ValueError as error:
+                    reason = str(error).split("\n")[0] or "unparseable certificate"
+                    self.__skip(reference, reason)
+                    continue
 
                 # Compare the domains
                 if set(self.cert.domains).intersection(certificate.domains):

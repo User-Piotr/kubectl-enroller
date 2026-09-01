@@ -203,6 +203,12 @@ def patch(
 
     if not targets:
         utils.console.print("No secrets found to patch.", style="bold red")
+        if operator.skipped_secrets:
+            utils.console.print(
+                f"{len(operator.skipped_secrets)} secret(s) could not be read: "
+                f"{', '.join(operator.skipped_secrets)}",
+                style="bold yellow",
+            )
         raise typer.Exit()
 
     # Show which cluster, and exactly what will be overwritten.
@@ -218,6 +224,14 @@ def patch(
         utils.console.print(
             f"  - {secret.namespace}/{secret.name} "
             f"(current cert expires {secret.cert.expiration_date:%Y-%m-%d})"
+        )
+
+    if operator.skipped_secrets:
+        utils.console.print(
+            f"\nWarning: {len(operator.skipped_secrets)} secret(s) could not be "
+            f"read and were not considered: "
+            f"{', '.join(operator.skipped_secrets)}",
+            style="bold yellow",
         )
 
     if not typer.confirm("\nConfirm?"):
